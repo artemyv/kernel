@@ -178,18 +178,41 @@ Return Value:
             KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: Type3InputBuffer is null\r\n"));
             break;
         }
-        if (dioc.InputBufferLength < sizeof(ProcessData))
+        if (dioc.InputBufferLength < sizeof(ProcessDataIn))
         {
             ntStatus = STATUS_BUFFER_TOO_SMALL;
             KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: TypeInputBufferLegnth is %u less than %u\r\n", 
-                unsigned(dioc.InputBufferLength), unsigned(sizeof(ProcessData))));
+                unsigned(dioc.InputBufferLength), unsigned(sizeof(ProcessDataIn))));
             break;
         }
-        auto data = (ProcessData*)dioc.Type3InputBuffer;
- 
+        if (dioc.OutputBufferLength < sizeof(ProcessDataOut))
+        {
+            ntStatus = STATUS_BUFFER_TOO_SMALL;
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: OutputBufferLength is %u less than %u\r\n",
+                unsigned(dioc.OutputBufferLength), unsigned(sizeof(ProcessDataOut))));
+            break;
+        }
+        auto data = (ProcessDataIn*)dioc.Type3InputBuffer;
+        auto out = (ProcessDataOut*)Irp->UserBuffer;
         //todo - open process and pass handle to caller
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: opening pid=%u\r\n", (unsigned)data->pId));
 
+        CLIENT_ID process{   };
+        process.UniqueProcess = (HANDLE)data->pId;
+        OBJECT_ATTRIBUTES objAttribs;
+        InitializeObjectAttributes(&objAttribs,
+            NULL,
+            0,
+            NULL,
+            NULL);
+
+        ntStatus = ZwOpenProcess(&out->hProcess, PROCESS_ALL_ACCESS, &objAttribs, &process);
+        if (!NT_SUCCESS(ntStatus))
+        {
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR Revealer.sys: ZwOpenProcess failed 0x%x\r\n", ntStatus));
+            break;
+        }
+        Irp->IoStatus.Information = sizeof(ProcessDataOut);
         break;
     }
 

@@ -9,8 +9,12 @@
 #define REVEALER_SIOCTL_OPEN_PROCESS \
     CTL_CODE( REVEALERDRIVER_TYPE, 0x900, METHOD_NEITHER, FILE_ANY_ACCESS  )
 
-extern "C" struct ProcessData
+extern "C" struct ProcessDataIn
 {
     unsigned long pId;
+};
+
+extern "C" struct ProcessDataOut
+{
     HANDLE        hProcess;
 };
