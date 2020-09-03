@@ -2,28 +2,13 @@
 
 #include <ntstrsafe.h>
 #include <wdm.h>
-#define POOLTAG_VART 'vart'
+#define POOLTAG_VART 'rvlr'
 
 #define RUN_TEST_NTSTATUS(x) \
 { auto res = x; if (!NT_SUCCESS(res)) {\
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR VartDriver.sys: Call failed 0x%x: " #x "\r\n", res)); \
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR Revealer.sys: Call failed 0x%x: " #x "\r\n", res)); \
     return res;}}
 
-class PoolGuard
-{
-public:
-    explicit PoolGuard(PVOID p) :m_p(p) {}
-    ~PoolGuard() {
-        ExFreePoolWithTag(m_p, POOLTAG_VART);
-    }
-private:
-    PoolGuard() = delete;
-    PoolGuard(const PoolGuard&) = delete;
-    PoolGuard(PoolGuard&&) = delete;
-    PoolGuard& operator=(const PoolGuard&) = delete;
-    PoolGuard& operator=(PoolGuard&&) = delete;
-    PVOID m_p;
-};
 class StringWrapper
 {
 public:
@@ -46,7 +31,7 @@ public:
             POOLTAG_VART);
         if (!ptr)
         {
-            KdPrintEx((DPFLTR_IHVDRIVER_ID,DPFLTR_ERROR_LEVEL,"ERROR VartDriver.sys: failed to allocate temp buffer\r\n"));
+            KdPrintEx((DPFLTR_IHVDRIVER_ID,DPFLTR_ERROR_LEVEL,"ERROR Revealer.sys: failed to allocate temp buffer\r\n"));
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         size_t rest;

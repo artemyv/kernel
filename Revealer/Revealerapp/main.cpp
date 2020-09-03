@@ -1,29 +1,28 @@
-// vartdriverdriver.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
-
 #include <iostream>
 #include <string>
 #include <Windows.h>
 #include "../Revealerdriver/Common.h"
 int main(int argc, const char* argv[])
 {
-    if (argc < 3)
+    if (argc < 2)
     {
-        std::cout << "Usage: " << argv[0] << " <tid> <priority>\n";
+        std::cout << "Usage: " << argv[0] << " <pid>\n";
         return 0;
     }
 
-    auto device = CreateFileW(LR"(\\.\vartdriver)", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    auto device = CreateFileW(LR"(\\.\revealer)", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (!device)
     {
         std::cerr << "Failed to oped driver " << GetLastError() << '\n';
         return 1;
     }
 
-    ThreadData d{ std::stoul(argv[1]), std::stoi(argv[2]) };
+    ProcessData d{ std::stoul(argv[1]) };
+    //todo - try to print dll list using OpenProcess
+
     DWORD bytesReturned;
     if (!DeviceIoControl(device,
-        (DWORD)VARTDRIVER_SIOCTL_SET_PRIORITY,
+        (DWORD)REVEALER_SIOCTL_OPEN_PROCESS,
         &d,
         (DWORD)sizeof(d),
         nullptr,
@@ -36,6 +35,7 @@ int main(int argc, const char* argv[])
     else
     {
         std::cout << "Success!\n";
+        //todo - try to print dll list using handle received from driver
     }
     CloseHandle(device);//todo use RAII
     return 0;
