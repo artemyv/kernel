@@ -13,9 +13,19 @@ extern "C" DRIVER_DISPATCH ZeroDriverRead;
 _Dispatch_type_(IRP_MJ_WRITE)
 extern "C" DRIVER_DISPATCH ZeroDriverWrite;
 
+
 #define LINK_NAME L"\\??\\zero"
 
 #define FUNCTION_TYPE_FROM_CTL_CODE(ctrlCode)     (((ULONG)(ctrlCode & 0x3FFC)) >> 2)
+
+struct Statictics
+{
+    LONG volatile readBytes;
+    LONG volatile writtenBytes;
+};
+static NTSTATUS InitStats(Statictics*);
+static NTSTATUS FlushStats(Statictics*);
+
 
 _Use_decl_annotations_
 extern "C"  NTSTATUS
@@ -29,7 +39,7 @@ DriverEntry(
     UNICODE_STRING  ntUnicodeString = RTL_CONSTANT_STRING(L"\\Device\\zero");
     PDEVICE_OBJECT  deviceObject = nullptr;    // ptr to device object
 
-    RUN_TEST_NTSTATUS(IoCreateDevice(DriverObject, 0,&ntUnicodeString,FILE_DEVICE_UNKNOWN,FILE_DEVICE_SECURE_OPEN,FALSE,&deviceObject));                
+    RUN_TEST_NTSTATUS(IoCreateDevice(DriverObject, sizeof(Statictics),&ntUnicodeString,FILE_DEVICE_UNKNOWN,FILE_DEVICE_SECURE_OPEN,FALSE,&deviceObject));
 
     UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
 
@@ -47,6 +57,8 @@ DriverEntry(
 
     deviceObject->Flags |= DO_DIRECT_IO;
 
+    auto stats = (Statictics*)deviceObject->DeviceExtension;
+    InitStats(stats);
 
     DriverObject->MajorFunction[IRP_MJ_CREATE] = ZeroDriverCreateClose;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = ZeroDriverCreateClose;
@@ -75,6 +87,8 @@ extern "C" void ZeroDriverUnload(
 
     if (deviceObject != NULL)
     {
+        auto stats = (Statictics*)deviceObject->DeviceExtension;
+        FlushStats(stats);
         IoDeleteDevice(deviceObject);
     }
 }
@@ -126,7 +140,7 @@ extern "C" NTSTATUS ZeroDriverRead(
 )
 {
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Read\r\n"));
-    UNREFERENCED_PARAMETER(DeviceObject);
+    auto stats = (Statictics*)DeviceObject->DeviceExtension;
 
     PAGED_CODE();
     PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
@@ -149,6 +163,9 @@ extern "C" NTSTATUS ZeroDriverRead(
             RtlZeroMemory(pReadDataBuffer, bytes);
             Irp->IoStatus.Status = STATUS_SUCCESS;
             Irp->IoStatus.Information = bytes;
+
+            auto result = InterlockedExchangeAdd(&stats->readBytes, bytes);
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Read %u bytes, total read %u bytes\r\n", bytes, bytes+result));
         }
     }
 
@@ -163,15 +180,30 @@ extern "C" NTSTATUS ZeroDriverWrite(
 )
 {
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Write\r\n"));
-    UNREFERENCED_PARAMETER(DeviceObject);
+    auto stats = (Statictics*)DeviceObject->DeviceExtension;
 
     PAGED_CODE();
     PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
 
     Irp->IoStatus.Status = STATUS_SUCCESS;
     Irp->IoStatus.Information = irpSp->Parameters.Write.Length;
+    auto result = InterlockedExchangeAdd(&stats->writtenBytes, irpSp->Parameters.Write.Length);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Written %u bytes, total written %u bytes\r\n", irpSp->Parameters.Write.Length, irpSp->Parameters.Write.Length+result));
 
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS InitStats(Statictics*stats)
+{
+    stats->readBytes = 0;
+    stats->writtenBytes = 0;
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS FlushStats(Statictics*)
+{
     return STATUS_SUCCESS;
 }
