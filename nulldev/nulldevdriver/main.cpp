@@ -4,32 +4,19 @@
 #include "Common.h"
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
-extern "C" DRIVER_UNLOAD RevealerDriverUnload;
+extern "C" DRIVER_UNLOAD ZeroDriverUnload;
 _Dispatch_type_(IRP_MJ_CREATE)
 _Dispatch_type_(IRP_MJ_CLOSE)
-extern "C" DRIVER_DISPATCH RevealerDriverCreateClose;
+extern "C" DRIVER_DISPATCH ZeroDriverCreateClose;
+_Dispatch_type_(IRP_MJ_READ)
+extern "C" DRIVER_DISPATCH ZeroDriverRead;
+_Dispatch_type_(IRP_MJ_WRITE)
+extern "C" DRIVER_DISPATCH ZeroDriverWrite;
 
-_Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
-extern "C" DRIVER_DISPATCH RevealerDriverDeviceControl;
-
-#define LINK_NAME L"\\??\\revealer"
+#define LINK_NAME L"\\??\\zero"
 
 #define FUNCTION_TYPE_FROM_CTL_CODE(ctrlCode)     (((ULONG)(ctrlCode & 0x3FFC)) >> 2)
 
-static NTSTATUS AddOsVersionToReg(PUNICODE_STRING  RegistryPath)
-{
-    RTL_OSVERSIONINFOW info;
-    RUN_TEST_NTSTATUS( RtlGetVersion(&info));
-
-    StringWrapper str;
-    RUN_TEST_NTSTATUS(str.Format(L"OS Version %u.%u.%u Platform %u", (unsigned)info.dwMajorVersion, (unsigned)info.dwMinorVersion, (unsigned)info.dwBuildNumber, (unsigned)info.dwPlatformId));
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: OS_DETAILS=%S\r\n", str.str()));
-
-    StringWrapper path;
-    RUN_TEST_NTSTATUS( path.Format(L"%wZ", RegistryPath));
-    RUN_TEST_NTSTATUS(RtlWriteRegistryValue(RTL_REGISTRY_ABSOLUTE, path.str(), L"OS_DETAILS", REG_SZ, str.str(), (ULONG)str.getBytes()));
-    return STATUS_SUCCESS;
-}
 _Use_decl_annotations_
 extern "C"  NTSTATUS
 DriverEntry(
@@ -37,11 +24,9 @@ DriverEntry(
     PUNICODE_STRING  RegistryPath
 )
 {
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,    "INFO  Revealer.sys: DriverEntry Registry path %wZ\r\n", RegistryPath));
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,    "INFO  nulldev.sys: DriverEntry Registry path %wZ\r\n", RegistryPath));
 
-    RUN_TEST_NTSTATUS(AddOsVersionToReg(RegistryPath));
-
-    UNICODE_STRING  ntUnicodeString = RTL_CONSTANT_STRING(L"\\Device\\revealer");
+    UNICODE_STRING  ntUnicodeString = RTL_CONSTANT_STRING(L"\\Device\\zero");
     PDEVICE_OBJECT  deviceObject = nullptr;    // ptr to device object
 
     RUN_TEST_NTSTATUS(IoCreateDevice(DriverObject, 0,&ntUnicodeString,FILE_DEVICE_UNKNOWN,FILE_DEVICE_SECURE_OPEN,FALSE,&deviceObject));                
@@ -55,24 +40,28 @@ DriverEntry(
         //
         // Delete everything that this routine has allocated.
         //
-        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR Revealer.sys: Couldn't create symbolic link 0x%x\r\n", res)); \
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: Couldn't create symbolic link 0x%x\r\n", res)); \
         IoDeleteDevice(deviceObject);
         return res;
     }
 
-    DriverObject->MajorFunction[IRP_MJ_CREATE] = RevealerDriverCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_CLOSE] = RevealerDriverCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RevealerDriverDeviceControl;
-    DriverObject->DriverUnload = RevealerDriverUnload;
+    deviceObject->Flags |= DO_DIRECT_IO;
+
+
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = ZeroDriverCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = ZeroDriverCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_READ] = ZeroDriverRead;
+    DriverObject->MajorFunction[IRP_MJ_WRITE] = ZeroDriverWrite;
+    DriverObject->DriverUnload = ZeroDriverUnload;
     return STATUS_SUCCESS;
 }
 
 
-extern "C" void RevealerDriverUnload(
+extern "C" void ZeroDriverUnload(
     _DRIVER_OBJECT* DriverObject
 )
 {
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: Unload\r\n"));
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO nulldev.sys: Unload\r\n"));
     PDEVICE_OBJECT deviceObject = DriverObject->DeviceObject;
 
     PAGED_CODE();
@@ -90,8 +79,7 @@ extern "C" void RevealerDriverUnload(
     }
 }
 
-extern "C" NTSTATUS
-RevealerDriverCreateClose(
+extern "C" NTSTATUS ZeroDriverCreateClose(
     PDEVICE_OBJECT DeviceObject,
     PIRP Irp
 )
@@ -118,7 +106,7 @@ Return Value:
 --*/
 
 {
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: CreateClose\r\n"));
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Create/Close\r\n"));
     UNREFERENCED_PARAMETER(DeviceObject);
 
     PAGED_CODE();
@@ -132,98 +120,58 @@ Return Value:
 }
 
 
-extern "C" NTSTATUS
-RevealerDriverDeviceControl(
+extern "C" NTSTATUS ZeroDriverRead(
     PDEVICE_OBJECT DeviceObject,
     PIRP Irp
 )
-
-/*++
-
-Routine Description:
-
-    This routine is called by the I/O system to perform a device I/O
-    control function.
-
-Arguments:
-
-    DeviceObject - a pointer to the object that represents the device
-        that I/O is to be done on.
-
-    Irp - a pointer to the I/O Request Packet for this request.
-
-Return Value:
-
-    NT status code
-
---*/
-
 {
-    NTSTATUS            ntStatus = STATUS_INVALID_DEVICE_REQUEST;
-
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Read\r\n"));
     UNREFERENCED_PARAMETER(DeviceObject);
 
     PAGED_CODE();
-
     PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
-    auto& dioc = irpSp->Parameters.DeviceIoControl;
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: DeviceControl %u:0x%x\r\n", DEVICE_TYPE_FROM_CTL_CODE(dioc.IoControlCode), FUNCTION_TYPE_FROM_CTL_CODE(dioc.IoControlCode)));
 
-    switch (dioc.IoControlCode)
+    auto bytes = irpSp->Parameters.Read.Length;
+    Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+    if (irpSp && Irp->MdlAddress)
     {
-    case REVEALER_SIOCTL_OPEN_PROCESS:
-        if (dioc.Type3InputBuffer == nullptr)
-        {
-            ntStatus = STATUS_INVALID_PARAMETER;
-            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: Type3InputBuffer is null\r\n"));
-            break;
-        }
-        if (dioc.InputBufferLength < sizeof(ProcessDataIn))
-        {
-            ntStatus = STATUS_BUFFER_TOO_SMALL;
-            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: TypeInputBufferLegnth is %u less than %u\r\n", 
-                unsigned(dioc.InputBufferLength), unsigned(sizeof(ProcessDataIn))));
-            break;
-        }
-        if (dioc.OutputBufferLength < sizeof(ProcessDataOut))
-        {
-            ntStatus = STATUS_BUFFER_TOO_SMALL;
-            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Revealer.sys: OutputBufferLength is %u less than %u\r\n",
-                unsigned(dioc.OutputBufferLength), unsigned(sizeof(ProcessDataOut))));
-            break;
-        }
-        auto data = (ProcessDataIn*)dioc.Type3InputBuffer;
-        auto out = (ProcessDataOut*)Irp->UserBuffer;
-        //todo - open process and pass handle to caller
-        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: opening pid=%u\r\n", (unsigned)data->pId));
+        auto pReadDataBuffer = MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 
-        CLIENT_ID process{   };
-        process.UniqueProcess = (HANDLE)data->pId;
-        OBJECT_ATTRIBUTES objAttribs;
-        InitializeObjectAttributes(&objAttribs,
-            NULL,
-            0,
-            NULL,
-            NULL);
-
-        ntStatus = ZwOpenProcess(&out->hProcess, PROCESS_ALL_ACCESS, &objAttribs, &process);
-        if (!NT_SUCCESS(ntStatus))
+        if (pReadDataBuffer && bytes > 0)
         {
-            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR Revealer.sys: ZwOpenProcess failed 0x%x\r\n", ntStatus));
-            break;
+            /*
+             * We use "RtlCopyMemory" in the kernel instead
+             * of memcpy.
+             * RtlCopyMemory *IS* memcpy, however it's best
+             * to use the
+             * wrapper in case this changes in the future.
+             */
+            RtlZeroMemory(pReadDataBuffer, bytes);
+            Irp->IoStatus.Status = STATUS_SUCCESS;
+            Irp->IoStatus.Information = bytes;
         }
-        Irp->IoStatus.Information = sizeof(ProcessDataOut);
-        break;
     }
-
-    //
-    // Finish the I/O operation by simply completing the packet and returning
-    // the same status as in the packet itself.
-    //
-
-    Irp->IoStatus.Status = ntStatus;
 
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-    return ntStatus;
+    return STATUS_SUCCESS;
+}
+
+extern "C" NTSTATUS ZeroDriverWrite(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Write\r\n"));
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    PAGED_CODE();
+    PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = irpSp->Parameters.Write.Length;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return STATUS_SUCCESS;
 }

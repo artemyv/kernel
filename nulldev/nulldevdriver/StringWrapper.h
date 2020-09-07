@@ -6,7 +6,7 @@
 
 #define RUN_TEST_NTSTATUS(x) \
 { auto res = x; if (!NT_SUCCESS(res)) {\
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR Revealer.sys: Call failed 0x%x: " #x "\r\n", res)); \
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: Call failed 0x%x: " #x "\r\n", res)); \
     return res;}}
 
 class StringWrapper
@@ -31,7 +31,7 @@ public:
             POOLTAG_VART);
         if (!ptr)
         {
-            KdPrintEx((DPFLTR_IHVDRIVER_ID,DPFLTR_ERROR_LEVEL,"ERROR Revealer.sys: failed to allocate temp buffer\r\n"));
+            KdPrintEx((DPFLTR_IHVDRIVER_ID,DPFLTR_ERROR_LEVEL,"ERROR nulldev.sys: failed to allocate temp buffer\r\n"));
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         size_t rest;

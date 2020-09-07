@@ -3,101 +3,50 @@
 #include <vector>
 
 #include <Windows.h>
-#include <psapi.h>
-// To ensure correct resolution of symbols, add Psapi.lib to TARGETLIBS
-// and compile with -DPSAPI_VERSION=1
 
 #include "../nulldevdriver/Common.h"
 
-static void ShowProcessInfo(HANDLE hProcess);
-
-int main(int argc, const char* argv[])
+int main()
 {
-    if (argc < 2)
-    {
-        std::cout << "Usage: " << argv[0] << " <pid>\n";
-        return 0;
-    }
-
-    auto device = CreateFileW(LR"(\\.\revealer)", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    auto device = CreateFileW(LR"(\\.\zero)", GENERIC_WRITE | GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (!device)
     {
         std::cerr << "Failed to oped driver " << GetLastError() << '\n';
         return 1;
     }
 
-    ProcessDataIn in{ std::stoul(argv[1]) };
-    //todo - try to print dll list using OpenProcess
-    auto hProcess = OpenProcess(PROCESS_QUERY_INFORMATION |
-        PROCESS_VM_READ,
-        FALSE, in.pId);
-    if (NULL == hProcess)
+    //todo  - read/write
+
+    std::vector<BYTE> buffer(1024,0xff);
+    DWORD read;
+    auto res = ReadFile(device, buffer.data(), (DWORD)buffer.size(), &read, nullptr);
+    if (!res)
     {
-        std::cerr << "Failed to oped process in user space " << GetLastError() << '\n';
+        std::cerr << "Failed to read from driver " << GetLastError() << '\n';
     }
     else
     {
-        std::cout << "User space:\n";
-        ShowProcessInfo(hProcess);
-        CloseHandle(hProcess);
+        std::cout << "Read " << read << " bytes\n";
+        for (auto val:buffer)
+        {
+            if (val != 0)
+            {
+                std::cerr << "Found non-zero value\n";
+                break;
+            }
+        }
     }
-
-    ProcessDataOut out{};
-
-    DWORD bytesReturned;
-    if (!DeviceIoControl(device,
-        (DWORD)REVEALER_SIOCTL_OPEN_PROCESS,
-        &in,
-        (DWORD)sizeof(in),
-        &out,
-        sizeof(out),
-        &bytesReturned,
-        nullptr))
+    DWORD written;
+    res = WriteFile(device, buffer.data(), (DWORD)buffer.size(), &written, NULL);
+    if(!res)
     {
-        std::cerr << "Failed to call DeviceIoControl " << GetLastError() << '\n';
+        std::cerr << "Failed to write to driver " << GetLastError() << '\n';
     }
     else
     {
-        hProcess = out.hProcess;
-        std::cout << "Kernel space:\n";
-        ShowProcessInfo(hProcess);
-        CloseHandle(hProcess);
+        std::cout << "Written " << written << " bytes\n";
     }
     CloseHandle(device);//todo use RAII
     return 0;
 }
 
-void ShowProcessInfo(HANDLE hProcess)
-{
-    // Get a list of all the modules in this process.
-    std::vector<HMODULE> hMods(1024);
-    DWORD cbNeeded;
-
-    if (EnumProcessModules(hProcess, hMods.data(), (DWORD)hMods.size(), &cbNeeded))
-    {
-        if (cbNeeded / sizeof(HMODULE) > hMods.size())
-        {
-            hMods.resize(cbNeeded / sizeof(HMODULE));
-            EnumProcessModules(hProcess, hMods.data(), (DWORD)hMods.size(), &cbNeeded);
-        }
-        if (cbNeeded / sizeof(HMODULE) < hMods.size())
-        {
-            hMods.resize(cbNeeded / sizeof(HMODULE));
-        }
-
-        for (auto& h : hMods)
-        {
-            wchar_t szModName[MAX_PATH];
-
-            // Get the full path to the module's file.
-
-            if (GetModuleFileNameExW(hProcess, h, szModName,
-                sizeof(szModName) / sizeof(wchar_t)))
-            {
-                // Print the module name and handle value.
-
-                std::wcout << L"\t0x" << std::hex << h << L"\t" << szModName <<  L"\n";
-            }
-        }
-    }
-}
