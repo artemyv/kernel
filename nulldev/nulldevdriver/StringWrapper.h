@@ -2,7 +2,7 @@
 
 #include <ntstrsafe.h>
 #include <wdm.h>
-#define POOLTAG_VART 'rvlr'
+#define POOLTAG_VART 'zero'
 
 #define RUN_TEST_NTSTATUS(x) \
 { auto res = x; if (!NT_SUCCESS(res)) {\

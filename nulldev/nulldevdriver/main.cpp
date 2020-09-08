@@ -22,9 +22,21 @@ struct Statictics
 {
     LONG volatile readBytes;
     LONG volatile writtenBytes;
+    UNICODE_STRING  RegistryPath;
 };
-static NTSTATUS InitStats(Statictics*);
+static NTSTATUS InitStats(Statictics*, PUNICODE_STRING  RegistryPath);
 static NTSTATUS FlushStats(Statictics*);
+static NTSTATUS ReadDwordFromRegistry(
+    IN PUNICODE_STRING KeyName,
+    IN PUNICODE_STRING ValueName,
+    IN OUT PULONG Value
+);
+static NTSTATUS
+WriteDwordToRegistry(
+    IN PUNICODE_STRING KeyName,
+    IN PUNICODE_STRING ValueName,
+    IN ULONG           Value
+);
 
 
 _Use_decl_annotations_
@@ -50,7 +62,7 @@ DriverEntry(
         //
         // Delete everything that this routine has allocated.
         //
-        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: Couldn't create symbolic link 0x%x\r\n", res)); \
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: Couldn't create symbolic link 0x%x\r\n", res));
         IoDeleteDevice(deviceObject);
         return res;
     }
@@ -58,7 +70,17 @@ DriverEntry(
     deviceObject->Flags |= DO_DIRECT_IO;
 
     auto stats = (Statictics*)deviceObject->DeviceExtension;
-    InitStats(stats);
+    res = InitStats(stats, RegistryPath);
+    if (!NT_SUCCESS(res))
+    {
+        //
+        // Delete everything that this routine has allocated.
+        //
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: Couldn't InitStats\r\n", res));
+        IoDeleteDevice(deviceObject);
+        IoDeleteSymbolicLink(&ntWin32NameString);
+        return res;
+    }
 
     DriverObject->MajorFunction[IRP_MJ_CREATE] = ZeroDriverCreateClose;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = ZeroDriverCreateClose;
@@ -195,15 +217,277 @@ extern "C" NTSTATUS ZeroDriverWrite(
     return STATUS_SUCCESS;
 }
 
-NTSTATUS InitStats(Statictics*stats)
+NTSTATUS InitStats(Statictics*stats, PUNICODE_STRING  RegistryPath)
 {
+
     stats->readBytes = 0;
     stats->writtenBytes = 0;
+    stats->RegistryPath.Buffer = nullptr;
+    stats->RegistryPath.Length = 0;
+    stats->RegistryPath.MaximumLength = 0;
 
+    UNICODE_STRING  ValueName = RTL_CONSTANT_STRING(L"Read");
+    ULONG read;
+    RUN_TEST_NTSTATUS(ReadDwordFromRegistry(RegistryPath, &ValueName, &read));
+    UNICODE_STRING  ValueName2 = RTL_CONSTANT_STRING(L"Written");
+    ULONG written;
+    RUN_TEST_NTSTATUS(ReadDwordFromRegistry(RegistryPath, &ValueName2, &written));
+
+    stats->readBytes = read;
+    stats->writtenBytes = written;
+
+    stats->RegistryPath.Buffer = (PWCH)ExAllocatePoolWithTag(PagedPool, stats->RegistryPath.MaximumLength, POOLTAG_VART);
+    if (stats->RegistryPath.Buffer == nullptr)
+    {
+        return STATUS_NO_MEMORY;
+    }
+    stats->RegistryPath.MaximumLength = RegistryPath->MaximumLength;
+    RtlCopyUnicodeString(&stats->RegistryPath, RegistryPath);
     return STATUS_SUCCESS;
 }
 
-NTSTATUS FlushStats(Statictics*)
+NTSTATUS FlushStats(Statictics* stats)
 {
+    UNICODE_STRING  ValueName = RTL_CONSTANT_STRING(L"Read");
+    ULONG read = stats->readBytes;
+    auto res = WriteDwordToRegistry(&stats->RegistryPath, &ValueName, read);
+    if (!NT_SUCCESS(res))
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys:Failed to write read=%u to %wZ\r\n", read, &stats->RegistryPath));
+    }
+    UNICODE_STRING  ValueName2 = RTL_CONSTANT_STRING(L"Written");
+    ULONG written = stats->writtenBytes;
+    res = WriteDwordToRegistry(&stats->RegistryPath, &ValueName2, written);
+    if (!NT_SUCCESS(res))
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys:Failed to write written=%u to %wZ\r\n", written, &stats->RegistryPath));
+    }
+
+    if (stats->RegistryPath.Buffer)
+        ExFreePoolWithTag(stats->RegistryPath.Buffer, POOLTAG_VART);
+    stats->RegistryPath.Buffer = nullptr;
+    stats->RegistryPath.Length = 0;
+    stats->RegistryPath.MaximumLength = 0;
     return STATUS_SUCCESS;
+}
+
+NTSTATUS
+ReadDwordFromRegistry(
+    IN PUNICODE_STRING KeyName,
+    IN PUNICODE_STRING ValueName,
+    IN OUT PULONG Value
+)
+
+/*++
+
+Routine Description:
+
+    Given a unicode value name this routine will go into the registry
+    location for the Chicago compatibilitymode information and get the
+    value.
+
+Arguments:
+
+    ValueName - the unicode name for the registry value located in the registry.
+    Value   - a pointer to the ULONG for the result.
+
+Return Value:
+
+    NTSTATUS
+
+    If STATUS_SUCCESSFUL is returned, the location *Value will be
+    updated with the DWORD value from the registry.  If any failing
+    status is returned, this value is untouched.
+
+--*/
+
+{
+    constexpr auto KEY_WORK_AREA = ((sizeof(KEY_VALUE_FULL_INFORMATION) + sizeof(ULONG)) + 64);
+
+    HANDLE Handle;
+    NTSTATUS Status;
+    ULONG RequestLength;
+    ULONG ResultLength;
+    UCHAR Buffer[KEY_WORK_AREA];
+    OBJECT_ATTRIBUTES ObjectAttributes;
+    PKEY_VALUE_FULL_INFORMATION KeyValueInformation;
+
+
+    InitializeObjectAttributes(&ObjectAttributes,
+        KeyName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL);
+
+    Status = ZwOpenKey(&Handle,
+        KEY_READ,
+        &ObjectAttributes);
+
+    if (!NT_SUCCESS(Status)) {
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: ZwOpenKey(READ, %wZ) failed 0x%x\r\n", KeyName, Status));
+        return Status;
+    }
+
+    RequestLength = KEY_WORK_AREA;
+
+    KeyValueInformation = (PKEY_VALUE_FULL_INFORMATION)Buffer;
+
+    while (1) {
+
+        Status = ZwQueryValueKey(Handle,
+            ValueName,
+            KeyValueFullInformation,
+            KeyValueInformation,
+            RequestLength,
+            &ResultLength);
+
+        NT_ASSERT(Status != STATUS_BUFFER_OVERFLOW);
+
+        if (Status == STATUS_BUFFER_OVERFLOW) {
+
+            //
+            // Try to get a buffer big enough.
+            //
+
+            if (KeyValueInformation != (PKEY_VALUE_FULL_INFORMATION)Buffer) {
+
+                ExFreePoolWithTag(KeyValueInformation, POOLTAG_VART);
+            }
+
+            RequestLength += 256;
+
+            KeyValueInformation = (PKEY_VALUE_FULL_INFORMATION)
+                ExAllocatePoolWithTag(PagedPool,
+                    RequestLength,
+                    POOLTAG_VART);
+
+            if (!KeyValueInformation) {
+
+                ZwClose(Handle);
+                return STATUS_NO_MEMORY;
+            }
+
+        }
+        else {
+
+            break;
+        }
+    }
+
+    ZwClose(Handle);
+
+    if (NT_SUCCESS(Status)) {
+
+        if (KeyValueInformation->DataLength != 0) {
+
+            PULONG DataPtr;
+
+            //
+            // Return contents to the caller.
+            //
+
+            DataPtr = (PULONG)
+                ((PUCHAR)KeyValueInformation + KeyValueInformation->DataOffset);
+            *Value = *DataPtr;
+
+        }
+        else {
+
+            //
+            // Treat as if no value was found
+            //
+
+            Status = STATUS_OBJECT_NAME_NOT_FOUND;
+        }
+    }
+    else
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: ZwQueryValueKey(%wZ) failed 0x%x\r\n", KeyName, Status));
+    }
+
+    if (KeyValueInformation != (PKEY_VALUE_FULL_INFORMATION)Buffer) {
+
+        ExFreePoolWithTag(KeyValueInformation, POOLTAG_VART);
+    }
+    if (Status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
+        //missing value is not an error - return 0
+        *Value = 0;
+        Status = STATUS_SUCCESS;
+    }
+    if (NT_SUCCESS(Status))
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "Info nulldev.sys: Read %wZ\\%wZ => %u\r\n", KeyName, ValueName, *Value));
+    }
+    return Status;
+}
+
+NTSTATUS
+WriteDwordToRegistry(
+    IN PUNICODE_STRING KeyName,
+    IN PUNICODE_STRING ValueName,
+    IN ULONG           Value
+)
+
+/*++
+
+Routine Description:
+
+    Given a unicode value name this routine will go into the registry
+    location for the Chicago compatibilitymode information and get the
+    value.
+
+Arguments:
+
+    ValueName - the unicode name for the registry value located in the registry.
+    Value   - a pointer to the ULONG for the result.
+
+Return Value:
+
+    NTSTATUS
+
+    If STATUS_SUCCESSFUL is returned, the location *Value will be
+    updated with the DWORD value from the registry.  If any failing
+    status is returned, this value is untouched.
+
+--*/
+
+{
+    OBJECT_ATTRIBUTES ObjectAttributes;
+    InitializeObjectAttributes(&ObjectAttributes,
+        KeyName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL);
+
+    HANDLE Handle;
+    auto Status = ZwOpenKey(&Handle,
+        KEY_WRITE,
+        &ObjectAttributes);
+
+    if (!NT_SUCCESS(Status)) {
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: ZwOpenKey(WRITE, %wZ) failed 0x%x\r\n", KeyName, Status));
+        return Status;
+    }
+
+    Status = ZwSetValueKey(Handle,
+        ValueName,
+        0,
+        REG_DWORD,
+        &Value,
+        sizeof(Value));
+
+    if (!NT_SUCCESS(Status)) {
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR nulldev.sys: ZwSetValueKey(%wZ) failed 0x%x\r\n", KeyName, Status));
+    }
+    else
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "Info nulldev.sys: Set %wZ\\%wZ = %u\r\n", KeyName, ValueName, Value));
+    }
+    ZwClose(Handle);
+
+    return Status;
 }
