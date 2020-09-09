@@ -12,6 +12,8 @@ _Dispatch_type_(IRP_MJ_READ)
 extern "C" DRIVER_DISPATCH ZeroDriverRead;
 _Dispatch_type_(IRP_MJ_WRITE)
 extern "C" DRIVER_DISPATCH ZeroDriverWrite;
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
+extern "C" DRIVER_DISPATCH ZeroDriverDeviceControl;
 
 
 #define LINK_NAME L"\\??\\zero"
@@ -86,6 +88,7 @@ DriverEntry(
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = ZeroDriverCreateClose;
     DriverObject->MajorFunction[IRP_MJ_READ] = ZeroDriverRead;
     DriverObject->MajorFunction[IRP_MJ_WRITE] = ZeroDriverWrite;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = ZeroDriverDeviceControl;
     DriverObject->DriverUnload = ZeroDriverUnload;
     return STATUS_SUCCESS;
 }
@@ -490,4 +493,80 @@ Return Value:
     ZwClose(Handle);
 
     return Status;
+}
+
+extern "C" NTSTATUS
+ZeroDriverDeviceControl(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+
+/*++
+
+Routine Description:
+
+    This routine is called by the I/O system to perform a device I/O
+    control function.
+
+Arguments:
+
+    DeviceObject - a pointer to the object that represents the device
+        that I/O is to be done on.
+
+    Irp - a pointer to the I/O Request Packet for this request.
+
+Return Value:
+
+    NT status code
+
+--*/
+
+{
+    NTSTATUS            ntStatus = STATUS_INVALID_DEVICE_REQUEST;
+
+    auto stats = (Statictics*)DeviceObject->DeviceExtension;
+
+    PAGED_CODE();
+
+    PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
+    auto& dioc = irpSp->Parameters.DeviceIoControl;
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Zero.sys: DeviceControl %u:0x%x\r\n", DEVICE_TYPE_FROM_CTL_CODE(dioc.IoControlCode), FUNCTION_TYPE_FROM_CTL_CODE(dioc.IoControlCode)));
+
+    switch (dioc.IoControlCode)
+    {
+    case ZERO_SIOCTL_GETSTATS:
+        if (dioc.OutputBufferLength < sizeof(StatsDataOut))
+        {
+            ntStatus = STATUS_BUFFER_TOO_SMALL;
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "INFO  Zero.sys: OutputBufferLength is %u less than %u\r\n",
+                unsigned(dioc.OutputBufferLength), unsigned(sizeof(StatsDataOut))));
+            break;
+        }
+        {
+            auto out = (StatsDataOut*)Irp->UserBuffer;
+
+            out->read = InterlockedCompareExchange(&stats->readBytes, 0, 0);
+            out->written = InterlockedCompareExchange(&stats->writtenBytes, 0, 0);
+            Irp->IoStatus.Information = sizeof(StatsDataOut);
+            ntStatus = STATUS_SUCCESS;
+        }
+        break;
+
+    case ZERO_SIOCTL_RESETSTATS:
+        InterlockedExchange(&stats->readBytes, 0);
+        InterlockedExchange(&stats->writtenBytes, 0);
+        ntStatus = STATUS_SUCCESS;
+        break;
+    }
+
+    //
+    // Finish the I/O operation by simply completing the packet and returning
+    // the same status as in the packet itself.
+    //
+
+    Irp->IoStatus.Status = ntStatus;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return ntStatus;
 }

@@ -15,7 +15,24 @@ int main()
         return 1;
     }
 
-    //todo  - read/write
+    
+    StatsDataOut data{};
+    DWORD bytesReturned;
+    if (!DeviceIoControl(device,
+        (DWORD)ZERO_SIOCTL_GETSTATS,
+        nullptr,
+        0,
+        &data,
+        sizeof(data),
+        &bytesReturned,
+        nullptr))
+    {
+        std::cerr << "Failed to call DeviceIoControl " << GetLastError() << '\n';
+    }
+    else
+    {
+        std::cout << "Before read=" << data.read << ", written=" << data.written << "\n";
+    }
 
     std::vector<BYTE> buffer(1024,0xff);
     DWORD read;
@@ -36,6 +53,23 @@ int main()
             }
         }
     }
+
+    if (!DeviceIoControl(device,
+        (DWORD)ZERO_SIOCTL_GETSTATS,
+        nullptr,
+        0,
+        &data,
+        sizeof(data),
+        &bytesReturned,
+        nullptr))
+    {
+        std::cerr << "Failed to call DeviceIoControl " << GetLastError() << '\n';
+    }
+    else
+    {
+        std::cout << "After Read read=" << data.read << ", written=" << data.written << "\n";
+    }
+
     DWORD written;
     res = WriteFile(device, buffer.data(), (DWORD)buffer.size(), &written, NULL);
     if(!res)
@@ -46,6 +80,47 @@ int main()
     {
         std::cout << "Written " << written << " bytes\n";
     }
+
+    if (!DeviceIoControl(device,
+        (DWORD)ZERO_SIOCTL_GETSTATS,
+        nullptr,
+        0,
+        &data,
+        sizeof(data),
+        &bytesReturned,
+        nullptr))
+    {
+        std::cerr << "Failed to call DeviceIoControl " << GetLastError() << '\n';
+    }
+    else
+    {
+        std::cout << "After Write read=" << data.read << ", written=" << data.written << "\n";
+    }
+
+    DeviceIoControl(device,
+        (DWORD)ZERO_SIOCTL_RESETSTATS,
+        nullptr,
+        0,
+        0,
+        0,
+        &bytesReturned,
+        nullptr);
+    if (!DeviceIoControl(device,
+        (DWORD)ZERO_SIOCTL_GETSTATS,
+        nullptr,
+        0,
+        &data,
+        sizeof(data),
+        &bytesReturned,
+        nullptr))
+    {
+        std::cerr << "Failed to call DeviceIoControl " << GetLastError() << '\n';
+    }
+    else
+    {
+        std::cout << "After reset read=" << data.read << ", written=" << data.written << "\n";
+    }
+
     CloseHandle(device);//todo use RAII
     return 0;
 }
