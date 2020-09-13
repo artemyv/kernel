@@ -192,6 +192,10 @@ extern "C" NTSTATUS ZeroDriverRead(
             auto result = InterlockedExchangeAdd(&stats->readBytes, bytes);
             KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  nulldev.sys: Read %u bytes, total read %u bytes\r\n", bytes, bytes+result));
         }
+        else
+        {
+            Irp->IoStatus.Status = STATUS_INSUFFICIENT_RESOURCES;
+        }
     }
 
     IoCompleteRequest(Irp, IO_NO_INCREMENT);

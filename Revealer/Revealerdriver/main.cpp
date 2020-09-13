@@ -4,13 +4,13 @@
 #include "Common.h"
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
-extern "C" DRIVER_UNLOAD RevealerDriverUnload;
+DRIVER_UNLOAD RevealerDriverUnload;
 _Dispatch_type_(IRP_MJ_CREATE)
 _Dispatch_type_(IRP_MJ_CLOSE)
-extern "C" DRIVER_DISPATCH RevealerDriverCreateClose;
+DRIVER_DISPATCH RevealerDriverCreateClose;
 
 _Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
-extern "C" DRIVER_DISPATCH RevealerDriverDeviceControl;
+DRIVER_DISPATCH RevealerDriverDeviceControl;
 
 #define LINK_NAME L"\\??\\revealer"
 
@@ -22,7 +22,7 @@ static NTSTATUS AddOsVersionToReg(PUNICODE_STRING  RegistryPath)
     RUN_TEST_NTSTATUS( RtlGetVersion(&info));
 
     StringWrapper str;
-    RUN_TEST_NTSTATUS(str.Format(L"OS Version %u.%u.%u Platform %u", (unsigned)info.dwMajorVersion, (unsigned)info.dwMinorVersion, (unsigned)info.dwBuildNumber, (unsigned)info.dwPlatformId));
+    RUN_TEST_NTSTATUS(str.Format(L"OS Version %u.%u.%u Platform %u", info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber, info.dwPlatformId));
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: OS_DETAILS=%S\r\n", str.str()));
 
     StringWrapper path;
@@ -68,7 +68,7 @@ DriverEntry(
 }
 
 
-extern "C" void RevealerDriverUnload(
+void RevealerDriverUnload(
     _DRIVER_OBJECT* DriverObject
 )
 {
@@ -84,14 +84,10 @@ extern "C" void RevealerDriverUnload(
 
     IoDeleteSymbolicLink(&ntWin32NameString);
 
-    if (deviceObject != NULL)
-    {
-        IoDeleteDevice(deviceObject);
-    }
+    IoDeleteDevice(deviceObject);
 }
 
-extern "C" NTSTATUS
-RevealerDriverCreateClose(
+NTSTATUS RevealerDriverCreateClose(
     PDEVICE_OBJECT DeviceObject,
     PIRP Irp
 )
@@ -132,8 +128,7 @@ Return Value:
 }
 
 
-extern "C" NTSTATUS
-RevealerDriverDeviceControl(
+NTSTATUS RevealerDriverDeviceControl(
     PDEVICE_OBJECT DeviceObject,
     PIRP Irp
 )
@@ -195,10 +190,10 @@ Return Value:
         auto data = (ProcessDataIn*)dioc.Type3InputBuffer;
         auto out = (ProcessDataOut*)Irp->UserBuffer;
         //todo - open process and pass handle to caller
-        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: opening pid=%u\r\n", (unsigned)data->pId));
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "INFO  Revealer.sys: opening pid=%u\r\n", data->pId));
 
         CLIENT_ID process{   };
-        process.UniqueProcess = (HANDLE)data->pId;
+        process.UniqueProcess = ULongToHandle(data->pId);
         OBJECT_ATTRIBUTES objAttribs;
         InitializeObjectAttributes(&objAttribs,
             NULL,
