@@ -12,6 +12,12 @@ DRIVER_DISPATCH SysMonCreateClose;
 _Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH SysMonDeviceControl;
 
+void PcreateProcessNotifyRoutineEx(
+    PEPROCESS Process,
+    HANDLE ProcessId,
+    PPS_CREATE_NOTIFY_INFO CreateInfo
+);
+
 #define LINK_NAME L"\\??\\SysMon"
 
 #define FUNCTION_TYPE_FROM_CTL_CODE(ctrlCode)     (((ULONG)(ctrlCode & 0x3FFC)) >> 2)
@@ -32,7 +38,7 @@ DriverEntry(
         PDEVICE_OBJECT  deviceObject = nullptr;
         NTSTATUS status = STATUS_SUCCESS;
         bool SymbolicLinkCreated = false;
-
+        bool RegisteredToCreateCB = false;
         ~State()
         {
             if (!NT_SUCCESS(status))
@@ -44,6 +50,10 @@ DriverEntry(
                 {
                     UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
                     IoDeleteSymbolicLink(&ntWin32NameString);
+                }
+                if (RegisteredToCreateCB)
+                {
+                    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
                 }
             }
         }
@@ -69,11 +79,25 @@ DriverEntry(
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR SysMon.sys: Couldn't create symbolic link 0x%x\r\n", state.status));
         return state.status;
     }
+    state.SymbolicLinkCreated = true;
 
     DriverObject->MajorFunction[IRP_MJ_CREATE] = SysMonCreateClose;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = SysMonCreateClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SysMonDeviceControl;
     DriverObject->DriverUnload = SysMonUnload;
+
+    state.status = PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx,FALSE);
+    if (!NT_SUCCESS(state.status))
+    {
+        //
+        // Delete everything that this routine has allocated.
+        //
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "ERROR SysMon.sys: PsSetCreateProcessNotifyRoutine failed 0x%x\r\n", state.status));
+        return state.status;
+    }
+    state.RegisteredToCreateCB = true;
+
+
     return state.status;
 }
 
@@ -94,6 +118,8 @@ void SysMonUnload(
 
     IoDeleteSymbolicLink(&ntWin32NameString);
     IoDeleteDevice(deviceObject);
+
+    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
 }
 
 NTSTATUS SysMonCreateClose(
@@ -184,4 +210,12 @@ Return Value:
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
     return ntStatus;
+}
+
+void PcreateProcessNotifyRoutineEx(
+    PEPROCESS /*Process*/,
+    HANDLE /*ProcessId*/,
+    PPS_CREATE_NOTIFY_INFO /*CreateInfo*/
+)
+{
 }
