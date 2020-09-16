@@ -43,18 +43,17 @@ DriverEntry(
         {
             if (!NT_SUCCESS(status))
             {
-                if(deviceObject)
-                    IoDeleteDevice(deviceObject);
-
+                if (RegisteredToCreateCB)
+                {
+                    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
+                }
                 if (SymbolicLinkCreated)
                 {
                     UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
                     IoDeleteSymbolicLink(&ntWin32NameString);
                 }
-                if (RegisteredToCreateCB)
-                {
-                    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
-                }
+                if(deviceObject)
+                    IoDeleteDevice(deviceObject);
             }
         }
 
@@ -116,10 +115,9 @@ void SysMonUnload(
     // Delete the link from our device name to a name in the Win32 namespace.
     //
 
+    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
     IoDeleteSymbolicLink(&ntWin32NameString);
     IoDeleteDevice(deviceObject);
-
-    PsSetCreateProcessNotifyRoutineEx(PcreateProcessNotifyRoutineEx, TRUE);
 }
 
 NTSTATUS SysMonCreateClose(
