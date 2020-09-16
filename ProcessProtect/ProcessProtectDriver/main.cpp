@@ -2,6 +2,7 @@
 #include <Ntddk.h>
 #include "StringWrapper.h"
 #include "Common.h"
+#include "ResourceLock.h"
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 DRIVER_UNLOAD ProcessProtectUnload;
@@ -33,7 +34,7 @@ struct Data
 {
     Protected pids[max_len];
     size_t len;
-    FAST_MUTEX m;
+    ExecutiveResource lock;
 
     PVOID pCBRegistrationHandle = NULL;
 
@@ -44,70 +45,58 @@ struct Data
 
         auto process = (PEPROCESS)OperationInformation->Object;
         HANDLE h = PsGetProcessId(process);
-        bool found = false;
-        ExAcquireFastMutex(&m);
+        AutoSharedLocker l(lock);
         for (size_t index = 0; index < len; ++index)
         {
             if (h == pids[index].pid)
             {
-                found = true;
-                break;
+                return true;
             }
         }
-        ExReleaseFastMutex(&m);
-        return found;
+        return false;
     }
 
     NTSTATUS clear()
     {
-        ExAcquireFastMutex(&m);
+        AutoLocker l(lock);
         len = 0;
-        ExReleaseFastMutex(&m);
         return STATUS_SUCCESS;
     }
     NTSTATUS unprotect(HANDLE pid)
     {
-        NTSTATUS result = STATUS_NOT_FOUND;
-        ExAcquireFastMutex(&m);
+        AutoLocker l(lock);
         for (size_t index = 0; index < len; ++index)
         {
             if (pid == pids[index].pid)
             {
                 pids[index] = pids[len -1];
                 len--;
-                result = STATUS_SUCCESS;
-                break;
+                return STATUS_SUCCESS;
             }
         }
-        ExReleaseFastMutex(&m);
-        return result;
+        return STATUS_NOT_FOUND;
     }
     NTSTATUS protect(HANDLE pid)
     {
-        NTSTATUS result = STATUS_SUCCESS;
-        ExAcquireFastMutex(&m);
+        AutoLocker l(lock);
         for (size_t index = 0; index < len; ++index)
         {
             if (pid == pids[index].pid)
             {
-                result = STATUS_ALREADY_REGISTERED;
+                return STATUS_ALREADY_REGISTERED;
                 break;
             }
         }
-        if (result == STATUS_SUCCESS)
+        if (len < max_len)
         {
-            if (len < max_len)
-            {
-                pids[len].pid = pid;
-                ++len;
-            }
-            else
-            {
-                result = STATUS_INSUFFICIENT_RESOURCES;
-            }
+            pids[len].pid = pid;
+            ++len;
+            return STATUS_SUCCESS;
         }
-        ExReleaseFastMutex(&m);
-        return result;
+        else
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
     }
 };
 _Use_decl_annotations_
@@ -157,7 +146,7 @@ DriverEntry(
         return state.status;
     }
     auto data = (Data*)state.deviceObject->DeviceExtension;
-    ExInitializeFastMutex(&data->m);
+    data->lock.Init();
     data->len = 0;
 
     UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
@@ -223,19 +212,17 @@ void ProcessProtectUnload(
     PDEVICE_OBJECT deviceObject = DriverObject->DeviceObject;
 
     PAGED_CODE();
-    UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
  
-    //
-    // Delete the link from our device name to a name in the Win32 namespace.
-    //
-
-    IoDeleteSymbolicLink(&ntWin32NameString);
     auto data = (Data*)deviceObject->DeviceExtension;
     if (data && data->pCBRegistrationHandle)
     {
         ObUnRegisterCallbacks(data->pCBRegistrationHandle);
     }
 
+    //todo - wait for all current callbacks to finish
+
+    UNICODE_STRING  ntWin32NameString = RTL_CONSTANT_STRING(LINK_NAME);
+    IoDeleteSymbolicLink(&ntWin32NameString);
     IoDeleteDevice(deviceObject);
 }
 
@@ -368,6 +355,16 @@ OB_PREOP_CALLBACK_STATUS PobPreOperationCallback(
     POB_PRE_OPERATION_INFORMATION OperationInformation
 )
 {
+
+    if (OperationInformation->KernelHandle)		// let kernel handles do anything
+        return OB_PREOP_SUCCESS;
+
+    if ((OperationInformation->Parameters->CreateHandleInformation.DesiredAccess & CB_PROCESS_TERMINATE) == 0) {
+        // process terminate flag is not asked for, let the operation continue
+        return OB_PREOP_SUCCESS;
+    }
+
+
     auto data = (Data*)RegistrationContext;
     if (data->IsProtectedProcess(OperationInformation))
     {
