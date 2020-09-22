@@ -1,39 +1,45 @@
 #pragma once
-//
-// Device type           -- in the "User Defined" range."
-//
-#define SYSMON_TYPE 40000
-//
-// The IOCTL function codes from 0x800 to 0xFFF are for customer use.
-//
-#define SYSMON_TYPE_SIOCTL_GETINFO \
-    CTL_CODE( PROCESSPROTECT_TYPE, 0x900, METHOD_NEITHER, FILE_ANY_ACCESS  )
-
-
-//No 32 app ->64bit driver support planned
-//No C App support planned
 enum class EventType
 {
-    ProcessStart,
-    ProcessEnd,
-    ThreadStart,
-    ThreadEnd
+    ProcessCreate,
+    ProcessExit,
+    ThreadCreate,
+    ThreadExit,
+    RegistrySetValue
 };
 struct EventHeader
 {
-    size_t    size;
-    EventType type;
-    ULONG64   timestamp;
+    LARGE_INTEGER TimeStamp;
+    EventType     Type;
+    USHORT        Size;
 };
 
-struct ProcessStartEvent : EventHeader
+struct ProcessCreateEvent : EventHeader
 {
-    INT32 pid;
-    size_t processNamelen;
-    wchar_t processName[1]; //Array extends beyond the struct - has to be last member
+    ULONG ProcessId;
+    ULONG ParentProcessId;
+    USHORT CommandLineLength;
+    USHORT CommandLineOffset;
 };
 
-struct ProcessEndEvent : EventHeader
+struct ProcessExitEvent : EventHeader
 {
-    INT32 pid;
+    ULONG ProcessId;
+};
+
+struct ThreadCreateExitEvent : EventHeader
+{
+    ULONG ProcessId;
+    ULONG ThreadId;
+};
+
+struct RegistrySetValueEvent : EventHeader {
+    ULONG ProcessId;
+    ULONG ThreadId;
+    ULONG DataType;	// REG_xxx
+    ULONG DataSize;
+    ULONG BufferSize;
+    WCHAR KeyName[256];
+    WCHAR ValueName[256];
+    // data follows here
 };

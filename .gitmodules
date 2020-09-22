@@ -1,0 +1,3 @@
+[submodule "SysMon/third-party/fmt"]
+	path = SysMon/third-party/fmt
+	url = https://github.com/fmtlib/fmt.git

@@ -2,7 +2,7 @@
 
 #include <ntstrsafe.h>
 #include <wdm.h>
-#define POOLTAG_SYSM 'sysm'
+#define DRIVER_TAG 'msys'
 
 #define RUN_TEST_NTSTATUS(x) \
 { auto res = x; if (!NT_SUCCESS(res)) {\
@@ -14,7 +14,7 @@ class PoolGuard
 public:
     explicit PoolGuard(PVOID p) :m_p(p) {}
     ~PoolGuard() {
-        ExFreePoolWithTag(m_p, POOLTAG_SYSM);
+        ExFreePoolWithTag(m_p, DRIVER_TAG);
     }
 private:
     PoolGuard() = delete;
@@ -34,7 +34,7 @@ public:
     StringWrapper& operator=(StringWrapper&&) = delete;
     ~StringWrapper() {
         if(ptr)
-            ExFreePoolWithTag(ptr, POOLTAG_SYSM);
+            ExFreePoolWithTag(ptr, DRIVER_TAG);
     }
 
     template <typename... ARGS>
